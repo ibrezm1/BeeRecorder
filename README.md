@@ -2,14 +2,53 @@
 
 This is a Flutter application that allows users to record audio, transcribe it using the Gemini API, and then chat with the AI about the transcription. It utilizes local storage for saving recordings and chat history.
 
-## Features
+## Key Features:
 
-* 🎤 **Audio Recording:** Record, pause, resume, and stop audio.
-* ⏱️ **Auto-Stop Timer:** Set a duration for the recording to stop automatically.
-* 💾 **Local Storage:** Save recordings and chat history locally using `sqflite`.
-* 🤖 **Gemini Transcription:** Transcribe recorded audio using the `gemini-2.5-flash-lite` model.
-* 💬 **AI Chat:** Chat with the Gemini model about the transcription content.
-* ⚙️ **Settings:** Configure your Gemini API key.
+1. **Voice Recording**
+    - Record audio with microphone permission handling
+    - Auto-stop timer (5, 10, 15, 20 minutes) with slider selection
+    - Option to extend recording by 5 minutes when time is running out
+    - Import external audio files
+
+2. **Transcription**
+    - Automatic transcription using Gemini AI
+    - Save with default name or custom name
+    - AI-powered title generation for recordings
+
+3. **AI Chat**
+    - Chat with your transcriptions
+    - Default suggestion chips on first chat: "Create a MOM", "Summarize key points", "List action items", "Extract dates and deadlines"
+    - Context-aware conversations
+
+4. **Storage**
+    - Local SQLite database for recordings and chat history
+    - Audio files stored locally
+    - Persistent chat conversations
+
+5. **Settings**
+    - Google API Key configuration
+    - Model selection (default: gemini-2.5-flash-lite)
+    - Dark mode toggle
+
+6. **Recordings Library**
+    - View all recordings
+    - Play audio files
+    - Delete recordings
+    - Navigate to chat
+
+## File Structure:
+- `main.dart` - App entry point
+- `screens/home_screen.dart` - Navigation hub
+- `screens/recording_screen.dart` - Recording interface
+- `screens/transcription_screen.dart` - Transcription & naming
+- `screens/chat_screen.dart` - Chat with recordings
+- `screens/recordings_list_screen.dart` - Recordings library
+- `screens/settings_screen.dart` - App settings
+- `utils/database_helper.dart` - SQLite operations
+- `utils/gemini_service.dart` - Gemini API integration
+
+Make sure to add your Gemini API key in the Settings before using the app!
+
 
 ## Prerequisites
 
@@ -34,7 +73,9 @@ Assuming you have the source code, navigate to the project root directory.
 You need to fetch all the necessary packages defined in the `pubspec.yaml` file. This is done using the `flutter pub get` command.
 
 ```bash
+flutter clean
 flutter pub get
+flutter build apk --release
 ```
 
 ### 3\. Configure the Gemini API Key
