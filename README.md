@@ -36,6 +36,12 @@ This is a Flutter application that allows users to record audio, transcribe it u
     - Delete recordings
     - Navigate to chat
 
+## Support the Creator
+
+If you found the Bee AI Recorder app helpful, consider buying me a coffee!  
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/ibrezm)
+
+
 ## File Structure:
 - `main.dart` - App entry point
 - `screens/home_screen.dart` - Navigation hub
