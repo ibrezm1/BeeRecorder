@@ -1,4 +1,4 @@
-# Voice Transcribe & Chat App
+# Voice Notes AI : Your Smart Recording Companion!
 
 This is a Flutter application that allows users to record audio, transcribe it using the Gemini API, and then chat with the AI about the transcription. It utilizes local storage for saving recordings and chat history.
 
