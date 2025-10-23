@@ -73,6 +73,7 @@ Assuming you have the source code, navigate to the project root directory.
 You need to fetch all the necessary packages defined in the `pubspec.yaml` file. This is done using the `flutter pub get` command.
 
 ```bash
+dart run flutter_launcher_icons:main
 flutter clean
 flutter pub get
 flutter build apk --release

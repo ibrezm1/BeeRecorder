@@ -195,7 +195,29 @@ class _RecordingScreenState extends State<RecordingScreen> {
   }
 
   Future<void> _importRecording() async {
-    // ... (This function remains unchanged)
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.audio,
+      );
+
+      if (result != null && result.files.single.path != null) {
+        final path = result.files.single.path!;
+        if (mounted) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => TranscriptionScreen(audioPath: path),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error importing file: $e')),
+        );
+      }
+    }
   }
 
   String _formatDuration(int seconds) {

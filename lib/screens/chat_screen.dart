@@ -1,5 +1,6 @@
-// screens/chat_screen.dart
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // Import for clipboard services
+import 'package:flutter_markdown/flutter_markdown.dart';
 import '../utils/database_helper.dart';
 import '../utils/gemini_service.dart';
 
@@ -127,6 +128,16 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
+  void _copyToClipboard(String text) {
+    Clipboard.setData(ClipboardData(text: text));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Copied to clipboard'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -159,6 +170,24 @@ class _ChatScreenState extends State<ChatScreen> {
               itemBuilder: (context, index) {
                 final message = _messages[index];
                 final isUser = message['isUser'] == 1;
+                final messageContent = message['content'] as String;
+
+                final textStyle = TextStyle(
+                  color: isUser
+                      ? Theme.of(context).colorScheme.onPrimaryContainer
+                      : Theme.of(context).colorScheme.onSecondaryContainer,
+                );
+
+                final Widget messageWidget;
+                if (isUser) {
+                  messageWidget = SelectableText(messageContent, style: textStyle);
+                } else {
+                  messageWidget = MarkdownBody(
+                    data: messageContent,
+                    selectable: true,
+                    styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(p: textStyle),
+                  );
+                }
 
                 return Align(
                   alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
@@ -166,7 +195,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     margin: const EdgeInsets.only(bottom: 12),
                     padding: const EdgeInsets.all(12),
                     constraints: BoxConstraints(
-                      maxWidth: MediaQuery.of(context).size.width * 0.7,
+                      maxWidth: MediaQuery.of(context).size.width * 0.75,
                     ),
                     decoration: BoxDecoration(
                       color: isUser
@@ -174,13 +203,23 @@ class _ChatScreenState extends State<ChatScreen> {
                           : Theme.of(context).colorScheme.secondaryContainer,
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: Text(
-                      message['content'],
-                      style: TextStyle(
-                        color: isUser
-                            ? Theme.of(context).colorScheme.onPrimaryContainer
-                            : Theme.of(context).colorScheme.onSecondaryContainer,
-                      ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        messageWidget,
+                        // MODIFICATION: Add a copy button at the bottom
+                        Align(
+                          alignment: Alignment.bottomRight,
+                          child: IconButton(
+                            icon: const Icon(Icons.copy),
+                            iconSize: 18,
+                            color: textStyle.color?.withOpacity(0.7),
+                            constraints: const BoxConstraints(),
+                            padding: const EdgeInsets.only(top: 8),
+                            onPressed: () => _copyToClipboard(messageContent),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 );
