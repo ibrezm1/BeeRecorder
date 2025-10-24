@@ -95,6 +95,20 @@ The app requires a **Gemini API Key** to function. You will need to enter this k
 
 -----
 
+## Icon Creation
+- To remove the background from icons, use: https://remove-white-background.imageonline.co/#google_vignette
+- To check if the icon background is transparent, use: https://onlinepngtools.com/check-if-png-is-transparent
+
+-----
+
+## TODO
+- [ ] Implement a foreground service for persistent recording even when the app is in the background.
+- [ ] Increase the maximum auto-stop duration to 2 hours (120 minutes).
+- [ ] Add home screen to say that autostop any time is possible 
+- [ ] Push to Android store and ask reddit to help in approving 10 users
+- [ ] Implement Ideation site with Google auth and AI to what user wants
+-----
+
 ## Running the App
 
 ### Running on a Device/Emulator
