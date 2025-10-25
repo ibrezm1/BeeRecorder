@@ -1,12 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:record/record.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:file_picker/file_picker.dart';
-import 'dart:io';
 import 'dart:async';
-import '../utils/database_helper.dart';
-import '../utils/gemini_service.dart';
 import 'transcription_screen.dart';
 
 class RecordingScreen extends StatefulWidget {
@@ -17,180 +13,193 @@ class RecordingScreen extends StatefulWidget {
 }
 
 class _RecordingScreenState extends State<RecordingScreen> {
-  final AudioRecorder _recorder = AudioRecorder();
-  bool _isRecording = false;
-  String? _recordingPath;
-  int _recordingDuration = 0;
-  Timer? _timer;
+  final service = FlutterBackgroundService();
 
-  // New state variables for improved timer logic
+  // --- UI State Variables ---
+  bool _isRecording = false;
+  int _recordingDuration = 0;
   bool _isAutoStopEnabled = true;
-  DateTime? _autoStopTargetTime;
+  int? _remainingSeconds;
   bool _shouldShowExtensionButton = false;
+
+  StreamSubscription? _updateSubscription;
+  StreamSubscription? _stoppedSubscription;
+  StreamSubscription? _startedSubscription;
+  StreamSubscription? _errorSubscription;
+  // ---
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeListeners();
+  }
+
+  Future<void> _initializeListeners() async {
+    // Check if the service is already running when the screen is opened
+    final isRunning = await service.isRunning();
+    if (mounted) {
+      setState(() => _isRecording = isRunning);
+    }
+
+    // Listen for state updates from the service
+    _updateSubscription = service.on('update').listen((event) {
+      if (mounted && event != null) {
+        setState(() {
+          _recordingDuration = event['duration'] as int? ?? 0;
+          _isAutoStopEnabled = event['isAutoStopEnabled'] as bool? ?? false;
+          _remainingSeconds = event['remainingSeconds'] as int?;
+          // Show the extend button in the last 10 seconds
+          _shouldShowExtensionButton =
+              _remainingSeconds != null && _remainingSeconds! <= 10 && _remainingSeconds! > 0;
+        });
+      }
+    });
+
+    // Listen for recording started confirmation
+    _startedSubscription = service.on('recordingStarted').listen((event) {
+      if (mounted) {
+        setState(() => _isRecording = true);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Recording started'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    });
+
+    // Listen for the final recording path
+    _stoppedSubscription = service.on('recordingStopped').listen((event) {
+      if (mounted) {
+        // Reset UI state first
+        setState(() {
+          _isRecording = false;
+          _recordingDuration = 0;
+          _remainingSeconds = null;
+          _shouldShowExtensionButton = false;
+        });
+
+        if (event != null && event['path'] != null) {
+          final path = event['path'] as String;
+          // Navigate to transcription screen
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => TranscriptionScreen(audioPath: path),
+            ),
+          );
+        }
+      }
+    });
+
+    // Listen for errors
+    _errorSubscription = service.on('recordingError').listen((event) {
+      if (mounted) {
+        setState(() => _isRecording = false);
+        final error = event?['error'] ?? 'Unknown error occurred';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Recording error: $error'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
+    });
+  }
 
   @override
   void dispose() {
-    _recorder.dispose();
-    _timer?.cancel();
+    _updateSubscription?.cancel();
+    _stoppedSubscription?.cancel();
+    _startedSubscription?.cancel();
+    _errorSubscription?.cancel();
     super.dispose();
   }
 
   Future<void> _startRecording() async {
+    // Request microphone permission
     final status = await Permission.microphone.request();
     if (!status.isGranted) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Microphone permission denied')),
+          const SnackBar(
+            content: Text('Microphone permission is required to record'),
+            backgroundColor: Colors.orange,
+          ),
         );
       }
       return;
     }
 
+    // Request notification permission (Android 13+)
+    if (await Permission.notification.isDenied) {
+      await Permission.notification.request();
+    }
+
+    // Get settings from the user first
     final settings = await _showAutoStopDialog();
-    if (settings == null) return;
+    if (settings == null) return; // User cancelled
 
     try {
-      final dir = await getApplicationDocumentsDirectory();
-      final timestamp = DateTime.now().millisecondsSinceEpoch;
-      _recordingPath = '${dir.path}/recording_$timestamp.m4a';
+      // Start the service if it's not already running
+      final isRunning = await service.isRunning();
+      if (!isRunning) {
+        final started = await service.startService();
+        if (!started) {
+          throw Exception('Failed to start background service');
+        }
+        // Give the service a moment to initialize
+        await Future.delayed(const Duration(milliseconds: 500));
+      }
 
-      await _recorder.start(const RecordConfig(), path: _recordingPath!);
+      // Send command to the service with the settings
+      service.invoke('startRecording', {
+        'isAutoStopEnabled': settings['enabled'] as bool,
+        'minutes': settings['minutes'] as int,
+      });
 
       setState(() {
         _isRecording = true;
         _recordingDuration = 0;
-        _shouldShowExtensionButton = false;
-        _isAutoStopEnabled = settings['enabled'];
-
-        if (_isAutoStopEnabled) {
-          final minutes = settings['minutes'] as int;
-          _autoStopTargetTime = DateTime.now().add(Duration(minutes: minutes));
-        } else {
-          _autoStopTargetTime = null;
-        }
+        _isAutoStopEnabled = settings['enabled'] as bool;
       });
-
-      _startUniversalTimer();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error starting recording: $e')),
+          SnackBar(
+            content: Text('Error starting recording: $e'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     }
   }
 
-  void _startUniversalTimer() {
-    _timer?.cancel();
-    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!_isRecording) {
-        timer.cancel();
-        return;
-      }
-
-      setState(() {
-        _recordingDuration++;
-
-        if (_isAutoStopEnabled && _autoStopTargetTime != null) {
-          final remaining = _autoStopTargetTime!.difference(DateTime.now());
-
-          if (remaining.inSeconds <= 0) {
-            _stopRecording();
-            return;
-          }
-          // Show the extend button in the last 10 seconds
-          _shouldShowExtensionButton = remaining.inSeconds <= 10;
-        } else {
-          // Ensure the button is hidden if auto-stop is disabled
-          _shouldShowExtensionButton = false;
-        }
-      });
-    });
-  }
-
-  Future<Map<String, dynamic>?> _showAutoStopDialog() async {
-    return showDialog<Map<String, dynamic>>(
-      context: context,
-      builder: (context) => _AutoStopDialog(),
-    );
-  }
-
-  Future<int?> _showSetDurationDialog() async {
-    return showDialog<int>(
-      context: context,
-      builder: (context) {
-        double selectedMinutes = 5;
-        return StatefulBuilder(
-          builder: (context, setState) {
-            return AlertDialog(
-              title: const Text('Auto-stop in...'),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    '${selectedMinutes.toInt()} minutes',
-                    style: Theme.of(context).textTheme.headlineMedium,
-                  ),
-                  Slider(
-                    value: selectedMinutes,
-                    min: 5,
-                    max: 20,
-                    divisions: 3,
-                    label: '${selectedMinutes.toInt()} min',
-                    onChanged: (value) => setState(() => selectedMinutes = value),
-                  ),
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context, null),
-                  child: const Text('Cancel'),
-                ),
-                ElevatedButton(
-                  onPressed: () => Navigator.pop(context, selectedMinutes.toInt()),
-                  child: const Text('Set'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
-  void _extendRecording() {
-    if (_autoStopTargetTime == null) return;
-    setState(() {
-      _autoStopTargetTime = _autoStopTargetTime!.add(const Duration(minutes: 5));
-      _shouldShowExtensionButton = false;
-    });
-  }
-
   Future<void> _stopRecording() async {
-    if (!_isRecording) return; // Prevent multiple calls
-    try {
-      final path = await _recorder.stop();
-      _timer?.cancel();
-
-      setState(() {
-        _isRecording = false;
-        _shouldShowExtensionButton = false;
-      });
-
-      if (path != null && mounted) {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => TranscriptionScreen(audioPath: path),
+    // Show confirmation dialog
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Stop Recording?'),
+        content: const Text('Are you sure you want to stop the recording?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
           ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error stopping recording: $e')),
-        );
-      }
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Stop'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      service.invoke('stopRecording');
+      // The 'recordingStopped' listener will handle the state change and navigation
     }
   }
 
@@ -214,7 +223,10 @@ class _RecordingScreenState extends State<RecordingScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error importing file: $e')),
+          SnackBar(
+            content: Text('Error importing file: $e'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     }
@@ -228,11 +240,10 @@ class _RecordingScreenState extends State<RecordingScreen> {
   }
 
   String _getAutoStopRemainingTime() {
-    if (!_isAutoStopEnabled || _autoStopTargetTime == null || !_isRecording) {
+    if (!_isAutoStopEnabled || _remainingSeconds == null || !_isRecording) {
       return '';
     }
-    final remaining = _autoStopTargetTime!.difference(DateTime.now());
-    return 'Stops in: ${_formatDuration(remaining.inSeconds)}';
+    return 'Stops in: ${_formatDuration(_remainingSeconds!)}';
   }
 
   @override
@@ -243,97 +254,199 @@ class _RecordingScreenState extends State<RecordingScreen> {
         centerTitle: true,
       ),
       body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            if (_isRecording) ...[
-              Text(
-                _formatDuration(_recordingDuration),
-                style: Theme.of(context).textTheme.displayLarge,
-              ),
-              const SizedBox(height: 20),
-              SwitchListTile(
-                title: const Text('Auto-stop recording'),
-                value: _isAutoStopEnabled,
-                onChanged: (bool value) async {
-                  if (value) {
-                    final duration = await _showSetDurationDialog();
-                    if (duration != null) {
-                      setState(() {
-                        _isAutoStopEnabled = true;
-                        _autoStopTargetTime = DateTime.now().add(Duration(minutes: duration));
-                      });
-                    }
-                  } else {
-                    setState(() {
-                      _isAutoStopEnabled = false;
-                      _autoStopTargetTime = null;
-                      _shouldShowExtensionButton = false;
-                    });
-                  }
-                },
-              ),
-              if (_isAutoStopEnabled)
-                Text(
-                  _getAutoStopRemainingTime(),
-                  style: Theme.of(context).textTheme.bodyLarge,
-                ),
-              const SizedBox(height: 40),
-              if (_shouldShowExtensionButton)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 20),
-                  child: ElevatedButton.icon(
-                    onPressed: _extendRecording,
-                    icon: const Icon(Icons.add_alarm),
-                    label: const Text('Extend 5 minutes'),
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.all(20.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (_isRecording) ...[
+                  // Recording duration display
+                  Text(
+                    _formatDuration(_recordingDuration),
+                    style: Theme.of(context).textTheme.displayLarge?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.red,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // Auto-stop toggle
+                  Card(
+                    child: SwitchListTile(
+                      title: const Text('Auto-stop recording'),
+                      subtitle: _isAutoStopEnabled
+                          ? Text(_getAutoStopRemainingTime())
+                          : null,
+                      value: _isAutoStopEnabled,
+                      onChanged: (bool value) async {
+                        if (value) {
+                          final duration = await _showSetDurationDialog();
+                          if (duration != null) {
+                            service.invoke('toggleAutoStop', {
+                              'enabled': true,
+                              'minutes': duration,
+                            });
+                            setState(() => _isAutoStopEnabled = true);
+                          }
+                        } else {
+                          service.invoke('toggleAutoStop', {'enabled': false});
+                          setState(() => _isAutoStopEnabled = false);
+                        }
+                      },
+                    ),
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // Extension button (shows in last 10 seconds)
+                  if (_shouldShowExtensionButton)
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        service.invoke('extendRecording');
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Extended by 5 minutes'),
+                            duration: Duration(seconds: 2),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.add_alarm),
+                      label: const Text('Extend 5 minutes'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.orange,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 24,
+                          vertical: 12,
+                        ),
+                      ),
+                    ),
+
+                  const SizedBox(height: 40),
+                ],
+
+                // Main recording button
+                GestureDetector(
+                  onTap: _isRecording ? _stopRecording : _startRecording,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 300),
+                    width: 120,
+                    height: 120,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: _isRecording ? Colors.red : Colors.deepPurple,
+                      boxShadow: [
+                        BoxShadow(
+                          color: (_isRecording ? Colors.red : Colors.deepPurple)
+                              .withOpacity(0.3),
+                          blurRadius: 20,
+                          spreadRadius: 5,
+                        ),
+                      ],
+                    ),
+                    child: Icon(
+                      _isRecording ? Icons.stop : Icons.mic,
+                      size: 60,
+                      color: Colors.white,
+                    ),
                   ),
                 ),
-            ],
-            GestureDetector(
-              onTap: _isRecording ? _stopRecording : _startRecording,
-              child: Container(
-                width: 120,
-                height: 120,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: _isRecording ? Colors.red : Colors.deepPurple,
-                  boxShadow: [
-                    BoxShadow(
-                      color: (_isRecording ? Colors.red : Colors.deepPurple).withOpacity(0.3),
-                      blurRadius: 20,
-                      spreadRadius: 5,
+
+                const SizedBox(height: 20),
+
+                Text(
+                  _isRecording ? 'Tap to stop' : 'Tap to start recording',
+                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                    color: Colors.grey,
+                  ),
+                ),
+
+                const SizedBox(height: 40),
+
+                // Import button (only when not recording)
+                if (!_isRecording)
+                  ElevatedButton.icon(
+                    onPressed: _importRecording,
+                    icon: const Icon(Icons.upload_file),
+                    label: const Text('Import Recording'),
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 24,
+                        vertical: 12,
+                      ),
                     ),
-                  ],
-                ),
-                child: Icon(
-                  _isRecording ? Icons.stop : Icons.mic,
-                  size: 60,
-                  color: Colors.white,
-                ),
-              ),
+                  ),
+              ],
             ),
-            const SizedBox(height: 40),
-            if (!_isRecording)
-              ElevatedButton.icon(
-                onPressed: _importRecording,
-                icon: const Icon(Icons.upload_file),
-                label: const Text('Import Recording'),
-              ),
-          ],
+          ),
         ),
       ),
     );
   }
+
+  // DIALOGS
+
+  Future<Map<String, dynamic>?> _showAutoStopDialog() {
+    return showDialog<Map<String, dynamic>>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => _AutoStopDialog(),
+    );
+  }
+
+  Future<int?> _showSetDurationDialog() {
+    return showDialog<int>(
+      context: context,
+      builder: (context) {
+        double selectedMinutes = 10;
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: const Text('Auto-stop in...'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    '${selectedMinutes.toInt()} minutes',
+                    style: Theme.of(context).textTheme.headlineMedium,
+                  ),
+                  const SizedBox(height: 20),
+                  Slider(
+                    value: selectedMinutes,
+                    min: 5,
+                    max: 60,
+                    divisions: 11,
+                    label: '${selectedMinutes.toInt()} min',
+                    onChanged: (value) => setState(() => selectedMinutes = value),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, null),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  onPressed: () => Navigator.pop(context, selectedMinutes.toInt()),
+                  child: const Text('Set'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
 }
 
-
+// Auto-stop dialog widget
 class _AutoStopDialog extends StatefulWidget {
   @override
   State<_AutoStopDialog> createState() => _AutoStopDialogState();
 }
 
 class _AutoStopDialogState extends State<_AutoStopDialog> {
-  double _selectedMinutes = 5;
+  double _selectedMinutes = 10;
   bool _isAutoStopEnabled = true;
 
   @override
@@ -349,15 +462,17 @@ class _AutoStopDialogState extends State<_AutoStopDialog> {
             onChanged: (bool value) => setState(() => _isAutoStopEnabled = value),
           ),
           if (_isAutoStopEnabled) ...[
+            const SizedBox(height: 20),
             Text(
               '${_selectedMinutes.toInt()} minutes',
               style: Theme.of(context).textTheme.headlineMedium,
             ),
+            const SizedBox(height: 10),
             Slider(
               value: _selectedMinutes,
               min: 5,
-              max: 20,
-              divisions: 3,
+              max: 60,
+              divisions: 11,
               label: '${_selectedMinutes.toInt()} min',
               onChanged: (value) => setState(() => _selectedMinutes = value),
             ),
@@ -366,7 +481,7 @@ class _AutoStopDialogState extends State<_AutoStopDialog> {
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.pop(context),
+          onPressed: () => Navigator.pop(context, null),
           child: const Text('Cancel'),
         ),
         ElevatedButton(

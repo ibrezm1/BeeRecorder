@@ -1,4 +1,3 @@
-// screens/home_screen.dart
 import 'package:flutter/material.dart';
 import 'recording_screen.dart';
 import 'recordings_list_screen.dart';
@@ -31,7 +30,13 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: _screens[_selectedIndex],
+      // MODIFICATION: Use IndexedStack to preserve the state of each screen
+      // when switching tabs. This is more efficient and ensures your
+      // RecordingScreen doesn't have to rebuild itself every time.
+      body: IndexedStack(
+        index: _selectedIndex,
+        children: _screens,
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedIndex,
         onDestinationSelected: (index) {

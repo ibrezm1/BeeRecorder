@@ -3,9 +3,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'screens/home_screen.dart';
 import 'screens/settings_screen.dart';
 import 'utils/database_helper.dart';
+import 'utils/background_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await initializeService(); // Initialize the service
   await DatabaseHelper.instance.database;
   runApp(const MyApp());
 }

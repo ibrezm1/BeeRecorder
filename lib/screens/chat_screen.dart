@@ -21,6 +21,7 @@ class _ChatScreenState extends State<ChatScreen> {
   String? _recordingName;
   bool _isLoading = false;
   bool _showChips = true;
+  bool _showTranscription = false; // State to toggle transcription view
 
   final List<String> _defaultPrompts = [
     'Create a MOM',
@@ -143,9 +144,74 @@ class _ChatScreenState extends State<ChatScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(_recordingName ?? 'Chat'),
+        actions: [
+          IconButton(
+            icon: Icon(
+              _showTranscription ? Icons.visibility_off : Icons.visibility,
+            ),
+            onPressed: () {
+              setState(() {
+                _showTranscription = !_showTranscription;
+              });
+            },
+            tooltip: 'Show Transcription',
+          ),
+        ],
       ),
       body: Column(
         children: [
+          if (_showTranscription)
+            Container(
+              padding: const EdgeInsets.all(12),
+              margin: const EdgeInsets.all(16),
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.4, // Adjusted height for button
+              ),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceVariant,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Original Transcription',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () {
+                          setState(() {
+                            _showTranscription = false;
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      child: SelectableText(_transcription ?? 'No transcription available.'),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  // MODIFICATION: Added a copy button below the transcription text
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: FilledButton.icon(
+                      icon: const Icon(Icons.copy, size: 16),
+                      label: const Text('Copy'),
+                      onPressed: _transcription != null && _transcription!.isNotEmpty
+                          ? () => _copyToClipboard(_transcription!)
+                          : null, // Disable button if there's no transcription
+                    ),
+                  ),
+                ],
+              ),
+            ),
           if (_showChips && _messages.isEmpty)
             Padding(
               padding: const EdgeInsets.all(16),
@@ -207,7 +273,6 @@ class _ChatScreenState extends State<ChatScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         messageWidget,
-                        // MODIFICATION: Add a copy button at the bottom
                         Align(
                           alignment: Alignment.bottomRight,
                           child: IconButton(
